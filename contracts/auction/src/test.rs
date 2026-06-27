@@ -8,51 +8,6 @@ use soroban_sdk::{
 use token::StellarAssetClient;
 
 
-fn setup_env() -> (Env, Address, Address, StellarBidAuctionClient<'static>) {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let contract_id = env.register(StellarBidAuction, ());
-    let client = StellarBidAuctionClient::new(&env, &contract_id);
-
-    let admin = Address::generate(&env);
-
-    let token_admin = Address::generate(&env);
-    let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
-    let token_id = token_contract.address();
-    let token_admin_client = StellarAssetClient::new(&env, &token_id);
-
-    client.initialize(&admin, &token_id);
-
-    let env: &'static Env = Box::leak(Box::new(env));
-    let client = StellarBidAuctionClient::new(env, &contract_id);
-
-    drop(client);
-
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let contract_id = env.register(StellarBidAuction, ());
-    let client = StellarBidAuctionClient::new(&env, &contract_id);
-
-    let admin = Address::generate(&env);
-    let token_admin = Address::generate(&env);
-    let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
-    let token_id = token_contract.address();
-
-    client.initialize(&admin, &token_id);
-
-    (env, admin, token_id, client)
-}
-
-fn create_registered_user(env: &Env, token_id: &Address, name: &str) -> Address {
-    let user = Address::generate(env);
-    // Fund the user with XLM for bidding
-    let token_admin_client = StellarAssetClient::new(env, token_id);
-    token_admin_client.mint(&user, &10_000_0000000); // 10,000 XLM
-    user
-}
-
 fn set_ledger_timestamp(env: &Env, timestamp: u64) {
     env.ledger().set(LedgerInfo {
         timestamp,
