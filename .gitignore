@@ -1,0 +1,10 @@
+target/
+contract.env
+.env
+.env.*
+**/node_modules/
+**/dist/
+**/out/
+**/*.tsbuildinfo
+.DS_Store
+Thumbs.db
