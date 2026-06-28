@@ -2,6 +2,8 @@
 
 StellarBid is a decentralized, real-time auction platform built on the **Stellar Soroban** smart contract framework with a modern **React + Vite + TypeScript + Tailwind CSS** frontend. Users connect their Stellar wallets, create organisations, list auction items with IPFS-hosted images, and place bids using native XLM — all secured by on-chain escrow.
 
+**Live Application Link:** [https://auction-onchain.vercel.app](https://auction-onchain.vercel.app)
+
 ---
 
 ## Deployed Contract
