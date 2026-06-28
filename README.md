@@ -52,39 +52,59 @@ A sample contract call (auction creation) that can be verified on the Stellar Ex
 ## Technical Architecture
 
 ```mermaid
-graph TD
-    UI[UI Components] --> WC[WalletContext]
-    UI --> TC[ToastContext]
-    UI --> CS[Contract Service]
-    UI --> IPFS[IPFS Service]
+graph TB
+    subgraph Frontend["Frontend (React + Vite + TypeScript)"]
+        UI["UI Components<br/>(CreateAuction, AuctionPage,<br/>ExplorePage, AdminPanel, Profile)"]
+        WC["WalletContext<br/>(StellarWalletsKit)"]
+        TC["ToastContext<br/>(Tx Status Tracker)"]
+        CS["Contract Service<br/>(simulateTransaction)"]
+        EP["EventPoller<br/>(getEvents, 4s interval)"]
+        IPFS["IPFS Service<br/>(Pinata Upload)"]
+    end
 
-    WC --> FR[Freighter Wallet]
-    WC --> XB[xBull Wallet]
-    WC --> AL[Albedo / LOBSTR]
+    subgraph Wallets["Stellar Wallets"]
+        FR["Freighter"]
+        XB["xBull"]
+        AL["Albedo / LOBSTR"]
+    end
 
-    WC --> RPC[Soroban RPC Node]
-    CS --> RPC
-    EP[EventPoller] --> RPC
+    subgraph Stellar["Stellar Testnet"]
+        RPC["Soroban RPC"]
+        SC["StellarBid Contract<br/>CACYFY...DS5F4"]
+        HZ["Horizon API"]
+    end
 
-    RPC --> SC[StellarBid Smart Contract]
-    SC --> Storage[(On-Chain Storage)]
+    subgraph Storage["On-Chain Storage"]
+        IS["Instance Storage<br/>(Admin, TokenId,<br/>AuctionCount, OrgCount)"]
+        PS["Persistent Storage<br/>(Usernames, Auctions,<br/>Orgs, BidDeposits,<br/>OrgMembers)"]
+    end
 
-    IPFS --> PIN[Pinata IPFS Pinning]
-    UI --> GW[Pinata IPFS Gateway]
-```
+    subgraph External["External Services"]
+        PIN["Pinata API<br/>(IPFS Pinning)"]
+        GW["Pinata Gateway<br/>(Image Delivery)"]
+    end
 
-### Component Flow Diagram (Fallback)
-```
-  [ UI Components ] ───> [ IPFS Service ] ───> [ Pinata IPFS Pinning ]
-          │                    │
-          ▼                    ▼
-  [ WalletContext ] ───> [ StellarWalletsKit ] ───> ( Freighter / xBull / Albedo )
-          │
-          ▼
-  [ Contract Service ] ───> [ Soroban RPC Node ] ───> [ StellarBid Contract ] ───> ( On-Chain Storage )
-          ▲
-          │
-  [ Event Poller ] ─── ( Background Events Poll )
+    UI --> WC
+    UI --> TC
+    UI --> CS
+    UI --> IPFS
+    WC --> FR & XB & AL
+    WC -->|"Sign XDR"| RPC
+    CS -->|"simulateTransaction<br/>(read-only queries)"| RPC
+    CS -->|"sendTransaction<br/>(state mutations)"| RPC
+    EP -->|"getEvents<br/>(contract events)"| RPC
+    EP -->|"State refresh<br/>callbacks"| UI
+    RPC --> SC
+    SC --> IS & PS
+    HZ -->|"loadAccount<br/>(XLM balance)"| WC
+    IPFS -->|"pinFileToIPFS"| PIN
+    UI -->|"Resolve ipfs://"| GW
+
+    style Frontend fill:#1a1a2e,stroke:#6366f1,color:#e2e8f0
+    style Stellar fill:#0f172a,stroke:#22d3ee,color:#e2e8f0
+    style Storage fill:#1e293b,stroke:#10b981,color:#e2e8f0
+    style Wallets fill:#1e1b4b,stroke:#a78bfa,color:#e2e8f0
+    style External fill:#1e293b,stroke:#f59e0b,color:#e2e8f0
 ```
 
 ### Data Flow
