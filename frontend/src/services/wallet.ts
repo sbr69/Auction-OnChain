@@ -1,5 +1,4 @@
 import { StellarWalletsKit, WalletNetwork, allowAllModules } from '@creit.tech/stellar-wallets-kit';
-import { NETWORK_PASSPHRASE } from '../utils/constants';
 
 export class WalletService {
   private static instance: StellarWalletsKit | null = null;

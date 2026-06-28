@@ -44,7 +44,7 @@ export function formatTimeRemaining(endTimeSeconds: number): {
 }
 
 export function resolveIpfsUrl(url: string): string {
-  if (!url) return 'https://placehold.co/600x400/121420/8b5cf6?text=No+Media';
+  if (!url) return 'https://placehold.co/600x400/2a3b40/9ebbc0?text=No+Media';
   if (url.startsWith('ipfs://')) {
     const hash = url.replace('ipfs://', '');
     return `https://ipfs.io/ipfs/${hash}`;

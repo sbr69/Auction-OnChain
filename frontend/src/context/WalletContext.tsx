@@ -1,19 +1,21 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { WalletService } from '../services/wallet';
-import { checkUserRegistration } from '../services/contract';
+import { checkUserRegistration, fetchAllOrgs } from '../services/contract';
 import { Horizon } from '@stellar/stellar-sdk';
-import { ADMIN_ADDRESS } from '../utils/constants';
+import { Organisation } from '../types';
 
 interface WalletContextType {
   address: string | null;
   username: string | null;
   isRegistered: boolean;
-  isAdmin: boolean;
   balance: number;
   isConnecting: boolean;
+  ownedOrgs: Organisation[];
+  joinedOrgIds: number[];
   connect: () => Promise<void>;
   disconnect: () => void;
   refreshUserInfo: () => Promise<void>;
+  refreshOrgs: () => Promise<void>;
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
@@ -24,6 +26,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isRegistered, setIsRegistered] = useState<boolean>(false);
   const [balance, setBalance] = useState<number>(0);
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
+  const [ownedOrgs, setOwnedOrgs] = useState<Organisation[]>([]);
+  const [joinedOrgIds, setJoinedOrgIds] = useState<number[]>([]);
 
   const fetchBalance = useCallback(async (addr: string) => {
     try {
@@ -36,18 +40,46 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, []);
 
+  const refreshOrgs = useCallback(async () => {
+    if (!address) {
+      setOwnedOrgs([]);
+      setJoinedOrgIds([]);
+      return;
+    }
+    try {
+      const allOrgs = await fetchAllOrgs();
+      const owned = allOrgs.filter(o => o.owner.toUpperCase() === address.toUpperCase());
+      setOwnedOrgs(owned);
+
+      // Check membership for each org
+      const { isOrgMember } = await import('../services/contract');
+      const memberIds: number[] = [];
+      for (const org of allOrgs) {
+        const isMember = await isOrgMember(org.id, address);
+        if (isMember) memberIds.push(org.id);
+      }
+      setJoinedOrgIds(memberIds);
+    } catch {
+      setOwnedOrgs([]);
+      setJoinedOrgIds([]);
+    }
+  }, [address]);
+
   const refreshUserInfo = useCallback(async () => {
     if (!address) {
       setUsername(null);
       setIsRegistered(false);
       setBalance(0);
+      setOwnedOrgs([]);
+      setJoinedOrgIds([]);
       return;
     }
     const reg = await checkUserRegistration(address);
     setIsRegistered(reg.isRegistered);
     setUsername(reg.username || null);
     await fetchBalance(address);
-  }, [address, fetchBalance]);
+    await refreshOrgs();
+  }, [address, fetchBalance, refreshOrgs]);
 
   useEffect(() => {
     if (address) {
@@ -62,10 +94,18 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       await kit.openModal({
         onWalletSelected: async (option) => {
           kit.setWallet(option.id);
-          const res: any = await (kit as any).getAddress().catch(() => (kit as any).getPublicKey());
-          const publicAddress = typeof res === 'string' ? res : (res.address || res.publicKey || res);
-          setAddress(publicAddress);
-          localStorage.setItem('stellar_bid_wallet', publicAddress);
+          let publicAddress = '';
+          if (typeof (kit as any).getPublicKey === 'function') {
+            const res = await kit.getPublicKey();
+            publicAddress = typeof res === 'string' ? res : (res.address || res.publicKey || String(res));
+          } else if (typeof (kit as any).getAddress === 'function') {
+            const res = await (kit as any).getAddress();
+            publicAddress = typeof res === 'string' ? res : (res.address || res.publicKey || String(res));
+          }
+          if (publicAddress) {
+            setAddress(publicAddress);
+            localStorage.setItem('stellar_bid_wallet', publicAddress);
+          }
         },
       });
     } catch (err) {
@@ -80,10 +120,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setUsername(null);
     setIsRegistered(false);
     setBalance(0);
+    setOwnedOrgs([]);
+    setJoinedOrgIds([]);
     localStorage.removeItem('stellar_bid_wallet');
   };
-
-  const isAdmin = Boolean(address && address.toUpperCase() === ADMIN_ADDRESS.toUpperCase());
 
   return (
     <WalletContext.Provider
@@ -91,12 +131,14 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         address,
         username,
         isRegistered,
-        isAdmin,
         balance,
         isConnecting,
+        ownedOrgs,
+        joinedOrgIds,
         connect,
         disconnect,
         refreshUserInfo,
+        refreshOrgs,
       }}
     >
       {children}

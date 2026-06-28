@@ -19,6 +19,10 @@ export const CONTRACT_ERRORS: Record<number, string> = {
   18: "Auction Already Finalized: This auction has already concluded.",
   19: "Invalid Username: Username must be between 3 and 20 characters.",
   20: "Invalid End Time: End time must be in the future.",
+  21: "Organisation not found on-chain.",
+  22: "Not Organisation Owner: Only the org owner can perform this action.",
+  23: "Already a member of this organisation.",
+  24: "Not a member of this organisation. Please join first.",
 };
 
 export function parseContractError(error: any): string {

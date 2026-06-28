@@ -1,0 +1,8 @@
+{
+  "name": "Stellaris Auction House",
+  "description": "A decentralized real-time auction platform on Stellar Soroban with a premium, light-themed frontend.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

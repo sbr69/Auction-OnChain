@@ -10,4 +10,7 @@ pub enum DataKey {
     UsernameExists(String),
     Auction(u64),
     BidDeposit(u64, Address),
+    OrgCount,
+    Org(u64),
+    OrgMember(u64, Address),
 }

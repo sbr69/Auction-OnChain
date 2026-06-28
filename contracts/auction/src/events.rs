@@ -7,10 +7,24 @@ pub fn user_registered(env: &Env, user: &Address, username: &String) {
     );
 }
 
-pub fn auction_created(env: &Env, auction_id: u64, creator: &Address, title: &String) {
+pub fn org_created(env: &Env, org_id: u64, owner: &Address, name: &String) {
+    env.events().publish(
+        (symbol_short!("org"), symbol_short!("created")),
+        (org_id, owner.clone(), name.clone()),
+    );
+}
+
+pub fn org_joined(env: &Env, org_id: u64, user: &Address) {
+    env.events().publish(
+        (symbol_short!("org"), symbol_short!("joined")),
+        (org_id, user.clone()),
+    );
+}
+
+pub fn auction_created(env: &Env, auction_id: u64, org_id: u64, creator: &Address, title: &String) {
     env.events().publish(
         (symbol_short!("auction"), symbol_short!("created")),
-        (auction_id, creator.clone(), title.clone()),
+        (auction_id, org_id, creator.clone(), title.clone()),
     );
 }
 

@@ -8,7 +8,7 @@ mod events;
 #[cfg(test)]
 mod test;
 
-use types::{AuctionData, AuctionStatus};
+use types::{AuctionData, AuctionStatus, OrgData};
 use storage::DataKey;
 
 #[contracterror]
@@ -35,6 +35,10 @@ pub enum AuctionError {
     AlreadyFinalized = 18,
     InvalidUsername = 19,
     InvalidEndTime = 20,
+    OrgNotFound = 21,
+    NotOrgOwner = 22,
+    AlreadyOrgMember = 23,
+    NotOrgMember = 24,
 }
 
 #[contract]
@@ -54,9 +58,12 @@ impl StellarBidAuction {
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::TokenId, &token_id);
         env.storage().instance().set(&DataKey::AuctionCount, &0u64);
+        env.storage().instance().set(&DataKey::OrgCount, &0u64);
 
         Ok(())
     }
+
+    // ─── User Registration ───
 
     pub fn register_user(
         env: Env,
@@ -101,9 +108,97 @@ impl StellarBidAuction {
         env.storage().persistent().has(&DataKey::Username(user))
     }
 
+    // ─── Organisation Management ───
+
+    pub fn create_org(
+        env: Env,
+        owner: Address,
+        name: String,
+        description: String,
+    ) -> Result<u64, AuctionError> {
+        owner.require_auth();
+
+        if !env.storage().instance().has(&DataKey::Admin) {
+            return Err(AuctionError::NotInitialized);
+        }
+
+        if !env.storage().persistent().has(&DataKey::Username(owner.clone())) {
+            return Err(AuctionError::UserNotRegistered);
+        }
+
+        let mut org_count: u64 = env.storage().instance().get(&DataKey::OrgCount).unwrap_or(0);
+        org_count += 1;
+
+        let org = OrgData {
+            id: org_count,
+            name: name.clone(),
+            description,
+            owner: owner.clone(),
+            member_count: 1, // owner is automatically a member
+        };
+
+        env.storage().persistent().set(&DataKey::Org(org_count), &org);
+        env.storage().instance().set(&DataKey::OrgCount, &org_count);
+
+        // Owner is automatically a member of their own org
+        env.storage().persistent().set(&DataKey::OrgMember(org_count, owner.clone()), &true);
+
+        events::org_created(&env, org_count, &owner, &name);
+
+        Ok(org_count)
+    }
+
+    pub fn join_org(
+        env: Env,
+        user: Address,
+        org_id: u64,
+    ) -> Result<(), AuctionError> {
+        user.require_auth();
+
+        if !env.storage().persistent().has(&DataKey::Username(user.clone())) {
+            return Err(AuctionError::UserNotRegistered);
+        }
+
+        let mut org: OrgData = env.storage().persistent()
+            .get(&DataKey::Org(org_id))
+            .ok_or(AuctionError::OrgNotFound)?;
+
+        if env.storage().persistent().has(&DataKey::OrgMember(org_id, user.clone())) {
+            return Err(AuctionError::AlreadyOrgMember);
+        }
+
+        env.storage().persistent().set(&DataKey::OrgMember(org_id, user.clone()), &true);
+
+        org.member_count += 1;
+        env.storage().persistent().set(&DataKey::Org(org_id), &org);
+
+        events::org_joined(&env, org_id, &user);
+
+        Ok(())
+    }
+
+    pub fn get_org(env: Env, org_id: u64) -> Result<OrgData, AuctionError> {
+        env.storage().persistent()
+            .get(&DataKey::Org(org_id))
+            .ok_or(AuctionError::OrgNotFound)
+    }
+
+    pub fn get_org_count(env: Env) -> u64 {
+        env.storage().instance().get(&DataKey::OrgCount).unwrap_or(0)
+    }
+
+    pub fn is_org_member(env: Env, org_id: u64, user: Address) -> bool {
+        env.storage().persistent()
+            .get(&DataKey::OrgMember(org_id, user))
+            .unwrap_or(false)
+    }
+
+    // ─── Auction Management ───
+
     pub fn create_auction(
         env: Env,
         creator: Address,
+        org_id: u64,
         title: String,
         description: String,
         media_url: String,
@@ -121,6 +216,16 @@ impl StellarBidAuction {
             return Err(AuctionError::UserNotRegistered);
         }
 
+        // Verify org exists
+        if !env.storage().persistent().has(&DataKey::Org(org_id)) {
+            return Err(AuctionError::OrgNotFound);
+        }
+
+        // Creator must be a member of the org
+        if !env.storage().persistent().get(&DataKey::OrgMember(org_id, creator.clone())).unwrap_or(false) {
+            return Err(AuctionError::NotOrgMember);
+        }
+
         let current_time = env.ledger().timestamp();
         if end_time <= current_time {
             return Err(AuctionError::InvalidEndTime);
@@ -131,6 +236,7 @@ impl StellarBidAuction {
 
         let auction = AuctionData {
             id: auction_count,
+            org_id,
             creator: creator.clone(),
             title: title.clone(),
             description,
@@ -147,30 +253,31 @@ impl StellarBidAuction {
         env.storage().persistent().set(&DataKey::Auction(auction_count), &auction);
         env.storage().instance().set(&DataKey::AuctionCount, &auction_count);
 
-        events::auction_created(&env, auction_count, &creator, &title);
+        events::auction_created(&env, auction_count, org_id, &creator, &title);
 
         Ok(auction_count)
     }
 
     pub fn review_auction(
         env: Env,
-        admin: Address,
+        reviewer: Address,
         auction_id: u64,
         approved: bool,
     ) -> Result<(), AuctionError> {
-        admin.require_auth();
-
-        let stored_admin: Address = env.storage().instance()
-            .get(&DataKey::Admin)
-            .ok_or(AuctionError::NotInitialized)?;
-
-        if admin != stored_admin {
-            return Err(AuctionError::NotAdmin);
-        }
+        reviewer.require_auth();
 
         let mut auction: AuctionData = env.storage().persistent()
             .get(&DataKey::Auction(auction_id))
             .ok_or(AuctionError::AuctionNotFound)?;
+
+        // Get the org this auction belongs to and verify the reviewer is the org owner
+        let org: OrgData = env.storage().persistent()
+            .get(&DataKey::Org(auction.org_id))
+            .ok_or(AuctionError::OrgNotFound)?;
+
+        if reviewer != org.owner {
+            return Err(AuctionError::NotOrgOwner);
+        }
 
         if auction.status != AuctionStatus::Pending {
             return Err(AuctionError::AuctionAlreadyReviewed);
@@ -188,6 +295,8 @@ impl StellarBidAuction {
 
         Ok(())
     }
+
+    // ─── Bidding ───
 
     pub fn place_bid(
         env: Env,
@@ -251,6 +360,8 @@ impl StellarBidAuction {
 
         Ok(())
     }
+
+    // ─── Finalization & Refunds ───
 
     pub fn finalize_auction(
         env: Env,
@@ -334,6 +445,8 @@ impl StellarBidAuction {
 
         Ok(())
     }
+
+    // ─── Read-only Queries ───
 
     pub fn get_auction(env: Env, auction_id: u64) -> Result<AuctionData, AuctionError> {
         env.storage().persistent()

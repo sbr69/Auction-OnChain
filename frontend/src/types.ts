@@ -1,7 +1,16 @@
 export type AuctionStatusType = 'Pending' | 'Approved' | 'Rejected' | 'Ended';
 
+export interface Organisation {
+  id: number;
+  name: string;
+  description: string;
+  owner: string;
+  memberCount: number;
+}
+
 export interface Auction {
   id: number;
+  orgId: number;
   creator: string;
   title: string;
   description: string;

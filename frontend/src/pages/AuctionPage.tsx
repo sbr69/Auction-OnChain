@@ -1,134 +1,126 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { fetchAuction, fetchUserBidDeposit } from '../services/contract';
-import { Auction } from '../types';
 import { useWallet } from '../context/WalletContext';
 import { useToast } from '../context/ToastContext';
-import { xlmToStroops, formatXlm, resolveIpfsUrl, shortenAddress } from '../utils/formatters';
+import { fetchAuction, fetchUserBidDeposit } from '../services/contract';
+import { EventPoller } from '../services/events';
+import { Auction } from '../types';
+import { formatTimeRemaining, formatXlm, resolveIpfsUrl, shortenAddress, xlmToStroops } from '../utils/formatters';
 import { parseContractError } from '../utils/errors';
 import { WalletService } from '../services/wallet';
-import { EventPoller } from '../services/events';
-import { AuctionTimer } from '../components/auction/AuctionTimer';
-import { AuctionStatusBadge } from '../components/auction/AuctionStatusBadge';
-import { BidHistory } from '../components/auction/BidHistory';
-import { Loader } from '../components/ui/Loader';
-import { Modal } from '../components/ui/Modal';
-import { Gavel, TrendingUp, User, ArrowLeft, AlertCircle, Trophy, Coins } from 'lucide-react';
+import { signTransactionWithKit } from '../services/transactionHelper';
 import { rpc, Contract, TransactionBuilder, Address, xdr } from '@stellar/stellar-sdk';
 import { CONTRACT_ID, NETWORK_PASSPHRASE, RPC_URL } from '../utils/constants';
-import confetti from 'canvas-confetti';
+import { Gavel, Clock, ArrowLeft, Trophy, Coins, AlertCircle, RefreshCcw, ExternalLink } from 'lucide-react';
 
-export const AuctionPage: React.FC = () => {
+export function AuctionPage() {
   const { id } = useParams<{ id: string }>();
-  const auctionId = Number(id);
-  const { address, isRegistered, balance, refreshUserInfo } = useWallet();
-  const { setTxState, showToast } = useToast();
+  const { address, isRegistered, balance } = useWallet();
+  const { showToast, setTxState } = useToast();
 
   const [auction, setAuction] = useState<Auction | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [userDeposit, setUserDeposit] = useState<number>(0);
-  const [bidAddition, setBidAddition] = useState<string>('');
-  const [showBidModal, setShowBidModal] = useState<boolean>(false);
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  const [bidError, setBidError] = useState<string | null>(null);
+  const [userDeposit, setUserDeposit] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [showBidModal, setShowBidModal] = useState(false);
+  const [bidAddition, setBidAddition] = useState('');
+  const [bidError, setBidError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [timeStr, setTimeStr] = useState('');
+  const [isExpired, setIsExpired] = useState(false);
 
-  const loadAuctionDetails = useCallback(async () => {
-    if (!auctionId) return;
+  const auctionId = parseInt(id || '0');
+
+  const loadData = useCallback(async () => {
     try {
-      const data = await fetchAuction(auctionId);
-      setAuction(data);
-      if (address) {
-        const deposit = await fetchUserBidDeposit(auctionId, address);
-        setUserDeposit(deposit);
+      const auc = await fetchAuction(auctionId);
+      setAuction(auc);
+      if (address && auc) {
+        const dep = await fetchUserBidDeposit(auc.id, address);
+        setUserDeposit(dep);
       }
     } catch (err) {
-      console.error("Failed to load auction details:", err);
+      console.error('Failed to load auction:', err);
     } finally {
       setLoading(false);
     }
   }, [auctionId, address]);
 
   useEffect(() => {
-    loadAuctionDetails();
-    const unsub = EventPoller.subscribe((ev) => {
-      if (ev.type === 'placed' || ev.type === 'ended' || ev.type === 'approved') {
-        loadAuctionDetails();
-      }
-    });
+    loadData();
+    const unsub = EventPoller.subscribe(() => loadData());
     return () => unsub();
-  }, [loadAuctionDetails]);
+  }, [loadData]);
 
-  if (loading) return <Loader label="Fetching on-chain auction state..." />;
-  if (!auction) {
+  useEffect(() => {
+    if (!auction) return;
+    const tick = () => {
+      const tr = formatTimeRemaining(auction.endTime);
+      setIsExpired(tr.isExpired);
+      if (tr.isExpired) {
+        setTimeStr('Ended');
+      } else if (tr.days > 0) {
+        setTimeStr(`${tr.days}d ${tr.hours}h ${tr.minutes}m`);
+      } else if (tr.hours > 0) {
+        setTimeStr(`${tr.hours}h ${tr.minutes}m ${tr.seconds}s`);
+      } else {
+        setTimeStr(`${tr.minutes}m ${tr.seconds}s`);
+      }
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [auction]);
+
+  if (loading) {
     return (
-      <div className="text-center py-16 space-y-4">
-        <h2 className="text-2xl font-bold text-white">Auction Not Found</h2>
-        <p className="text-slate-400">The requested auction ID does not exist on Stellar Testnet.</p>
-        <Link to="/" className="inline-flex items-center gap-2 px-4 py-2 bg-brand-600 text-white rounded-xl text-sm">
-          <ArrowLeft className="w-4 h-4" /> Back to Explore
-        </Link>
+      <div className="py-12 flex justify-center">
+        <div className="w-8 h-8 border-2 border-brand-600 border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
 
-  const isExpired = auction.endTime <= Math.floor(Date.now() / 1000);
-  const isCreator = address && address.toUpperCase() === auction.creator.toUpperCase();
-  const isWinner = isExpired && auction.totalBids > 0 && address && address.toUpperCase() === auction.highestBidder.toUpperCase();
-  const isLoser = isExpired && auction.totalBids > 0 && !isWinner && userDeposit > 0;
+  if (!auction) {
+    return (
+      <div className="py-20 text-center">
+        <h2 className="text-2xl font-serif text-brand-900 mb-3">Auction Not Found</h2>
+        <p className="text-brand-600 mb-6">This auction doesn't exist on-chain.</p>
+        <Link to="/explore" className="px-6 py-3 bg-brand-900 text-surface rounded-full font-medium">Back to Explore</Link>
+      </div>
+    );
+  }
 
-  const minRequiredTotal = auction.totalBids === 0 
-    ? auction.startingBid 
-    : auction.highestBid + auction.minIncrement;
+  const isCreator = address && auction.creator.toUpperCase() === address.toUpperCase();
+  const isWinner = address && auction.highestBidder.toUpperCase() === address.toUpperCase();
+  const isLoser = address && !isWinner && userDeposit > 0 && auction.status === 'Ended';
 
-  const currentTotalWithAddition = userDeposit + (Number(bidAddition) || 0);
+  const minRequiredTotal = auction.totalBids > 0
+    ? auction.highestBid + auction.minIncrement
+    : auction.startingBid;
 
-  const signAndSend = async (server: rpc.Server, tx: any) => {
-    const kit = WalletService.getKit();
-    const signRes: any = await (kit as any).signTx({
-      xdr: tx.toXDR(),
-      networkPassphrase: NETWORK_PASSPHRASE,
-      publicKey: address,
-    }).catch(async () => {
-      return await (kit as any).signTransaction(tx.toXDR(), {
-        networkPassphrase: NETWORK_PASSPHRASE,
-        address,
-      });
-    });
+  const currentTotalWithAddition = userDeposit + parseFloat(bidAddition || '0');
 
-    const signedXdr = typeof signRes === 'string' ? signRes : (signRes.result || signRes.signedTxXdr || signRes.xdr);
-    const signedTx = TransactionBuilder.fromXDR(signedXdr, NETWORK_PASSPHRASE);
-    return await server.sendTransaction(signedTx);
-  };
-
-  const handlePlaceBidSubmit = async (e: React.FormEvent) => {
+  const handlePlaceBid = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!address || !auction) return;
-
-    const additionNum = Number(bidAddition);
-    if (isNaN(additionNum) || additionNum <= 0) {
-      setBidError('Please enter a valid additional bid amount.');
-      return;
-    }
-
-    if (currentTotalWithAddition < minRequiredTotal) {
-      setBidError(`Bid Too Low: Your cumulative total (${currentTotalWithAddition} XLM) must be at least ${minRequiredTotal} XLM.`);
-      return;
-    }
-
-    if (additionNum > balance) {
-      setBidError(`Insufficient Balance: You only have ${balance.toFixed(2)} XLM available.`);
-      return;
-    }
-
+    if (!address || !bidAddition) return;
+    setBidError('');
     setIsSubmitting(true);
-    setBidError(null);
-    setTxState({ status: 'SIMULATING', message: 'Simulating bid escrow transaction on Soroban...' });
+
+    const additionXlm = parseFloat(bidAddition);
+    const newTotal = userDeposit + additionXlm;
+
+    if (newTotal < minRequiredTotal) {
+      setBidError(`Your total deposit (${newTotal.toFixed(2)} XLM) must be at least ${minRequiredTotal.toFixed(2)} XLM`);
+      setIsSubmitting(false);
+      return;
+    }
 
     try {
+      const additionStroops = xlmToStroops(additionXlm);
+      setTxState({ status: 'SIMULATING', message: 'Simulating bid...' });
+
       const server = new rpc.Server(RPC_URL);
       const contract = new Contract(CONTRACT_ID);
       const account = await server.getAccount(address);
-      const additionStroops = xlmToStroops(additionNum);
 
       const tx = await server.prepareTransaction(
         new TransactionBuilder(account, { fee: '200000', networkPassphrase: NETWORK_PASSPHRASE })
@@ -136,19 +128,26 @@ export const AuctionPage: React.FC = () => {
             contract.call(
               'place_bid',
               new Address(address).toScVal(),
-              xdr.ScVal.scvU64(new xdr.Uint64(auction.id)),
-              xdr.ScVal.scvI128(new (xdr as any).Int128([BigInt(0), additionStroops]))
+              xdr.ScVal.scvU64(new xdr.Uint64(auctionId)),
+              xdr.ScVal.scvI128(new xdr.Int128Parts({
+                lo: new xdr.Uint64(additionStroops & BigInt('0xFFFFFFFFFFFFFFFF')),
+                hi: new xdr.Int64(additionStroops >> BigInt(64)),
+              }))
             )
           )
           .setTimeout(30)
           .build()
       );
 
-      setTxState({ status: 'SIGNING', message: 'Please confirm XLM escrow transfer in your wallet...' });
-      const sendRes = await signAndSend(server, tx);
+      setTxState({ status: 'SIGNING', message: 'Confirm bid in wallet...' });
+      const signedXdr = await signTransactionWithKit(tx.toXDR(), address);
+
+      setTxState({ status: 'SUBMITTING', message: 'Escrowing XLM on-chain...' });
+      const signedTx = TransactionBuilder.fromXDR(signedXdr, NETWORK_PASSPHRASE);
+      const sendRes = await server.sendTransaction(signedTx);
 
       if (sendRes.status === 'PENDING') {
-        setTxState({ status: 'PENDING', txHash: sendRes.hash, message: 'Waiting for ledger inclusion...' });
+        setTxState({ status: 'PENDING', txHash: sendRes.hash, message: 'Waiting for confirmation...' });
         let txStatus = await server.getTransaction(sendRes.hash);
         while (txStatus.status === rpc.Api.GetTransactionStatus.NOT_FOUND) {
           await new Promise(r => setTimeout(r, 1500));
@@ -156,31 +155,29 @@ export const AuctionPage: React.FC = () => {
         }
 
         if (txStatus.status === rpc.Api.GetTransactionStatus.SUCCESS) {
-          setTxState({ status: 'SUCCESS', txHash: sendRes.hash, message: `Bid of +${additionNum} XLM placed successfully!` });
-          showToast('success', 'Bid Placed!', `Your cumulative bid is now ${currentTotalWithAddition} XLM.`);
-          confetti({ particleCount: 80, spread: 60, origin: { y: 0.7 } });
+          setTxState({ status: 'SUCCESS', txHash: sendRes.hash, message: 'Bid placed!' });
+          showToast('success', 'Bid Placed!', `Successfully added ${additionXlm} XLM to escrow.`);
           setShowBidModal(false);
           setBidAddition('');
-          await loadAuctionDetails();
-          await refreshUserInfo();
+          await loadData();
         } else {
-          throw new Error('Bid invocation failed on-chain.');
+          throw new Error('Transaction failed');
         }
       }
     } catch (err: any) {
-      console.error("Bid error:", err);
-      const parsedErr = parseContractError(err);
-      setBidError(parsedErr);
-      setTxState({ status: 'FAILED', error: parsedErr });
+      const parsed = parseContractError(err);
+      setBidError(parsed);
+      setTxState({ status: 'FAILED', error: parsed });
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleFinalizeAuction = async () => {
-    if (!address || !auction) return;
-    setTxState({ status: 'SIMULATING', message: 'Finalizing auction on Soroban...' });
+  const handleFinalize = async () => {
+    if (!address) return;
+    setIsSubmitting(true);
     try {
+      setTxState({ status: 'SIMULATING', message: 'Simulating finalization...' });
       const server = new rpc.Server(RPC_URL);
       const contract = new Contract(CONTRACT_ID);
       const account = await server.getAccount(address);
@@ -188,38 +185,51 @@ export const AuctionPage: React.FC = () => {
       const tx = await server.prepareTransaction(
         new TransactionBuilder(account, { fee: '200000', networkPassphrase: NETWORK_PASSPHRASE })
           .addOperation(
-            contract.call('finalize_auction', new Address(address).toScVal(), xdr.ScVal.scvU64(new xdr.Uint64(auction.id)))
+            contract.call(
+              'finalize_auction',
+              new Address(address).toScVal(),
+              xdr.ScVal.scvU64(new xdr.Uint64(auctionId))
+            )
           )
           .setTimeout(30)
           .build()
       );
 
-      setTxState({ status: 'SIGNING', message: 'Confirm finalization in wallet...' });
-      const sendRes = await signAndSend(server, tx);
+      setTxState({ status: 'SIGNING', message: 'Confirm in wallet...' });
+      const signedXdr = await signTransactionWithKit(tx.toXDR(), address);
+
+      setTxState({ status: 'SUBMITTING', message: 'Finalizing auction...' });
+      const signedTx = TransactionBuilder.fromXDR(signedXdr, NETWORK_PASSPHRASE);
+      const sendRes = await server.sendTransaction(signedTx);
 
       if (sendRes.status === 'PENDING') {
-        setTxState({ status: 'PENDING', txHash: sendRes.hash, message: 'Processing payout...' });
+        setTxState({ status: 'PENDING', txHash: sendRes.hash });
         let txStatus = await server.getTransaction(sendRes.hash);
         while (txStatus.status === rpc.Api.GetTransactionStatus.NOT_FOUND) {
           await new Promise(r => setTimeout(r, 1500));
           txStatus = await server.getTransaction(sendRes.hash);
         }
+
         if (txStatus.status === rpc.Api.GetTransactionStatus.SUCCESS) {
-          setTxState({ status: 'SUCCESS', txHash: sendRes.hash, message: 'Auction finalized and funds transferred to creator!' });
-          showToast('success', 'Auction Finalized!', 'Winning payout completed.');
-          await loadAuctionDetails();
+          setTxState({ status: 'SUCCESS', txHash: sendRes.hash, message: 'Auction finalized!' });
+          showToast('success', 'Auction Finalized!', 'Winning funds have been transferred.');
+          await loadData();
         }
       }
     } catch (err: any) {
-      const parsedErr = parseContractError(err);
-      setTxState({ status: 'FAILED', error: parsedErr });
+      const parsed = parseContractError(err);
+      setTxState({ status: 'FAILED', error: parsed });
+      showToast('error', 'Finalization Failed', parsed);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleClaimRefund = async () => {
-    if (!address || !auction) return;
-    setTxState({ status: 'SIMULATING', message: 'Reclaiming escrowed XLM...' });
+    if (!address) return;
+    setIsSubmitting(true);
     try {
+      setTxState({ status: 'SIMULATING', message: 'Simulating refund claim...' });
       const server = new rpc.Server(RPC_URL);
       const contract = new Contract(CONTRACT_ID);
       const account = await server.getAccount(address);
@@ -227,109 +237,118 @@ export const AuctionPage: React.FC = () => {
       const tx = await server.prepareTransaction(
         new TransactionBuilder(account, { fee: '200000', networkPassphrase: NETWORK_PASSPHRASE })
           .addOperation(
-            contract.call('claim_refund', new Address(address).toScVal(), xdr.ScVal.scvU64(new xdr.Uint64(auction.id)))
+            contract.call(
+              'claim_refund',
+              new Address(address).toScVal(),
+              xdr.ScVal.scvU64(new xdr.Uint64(auctionId))
+            )
           )
           .setTimeout(30)
           .build()
       );
 
-      setTxState({ status: 'SIGNING', message: 'Confirm refund request in wallet...' });
-      const sendRes = await signAndSend(server, tx);
+      setTxState({ status: 'SIGNING', message: 'Confirm in wallet...' });
+      const signedXdr = await signTransactionWithKit(tx.toXDR(), address);
+
+      setTxState({ status: 'SUBMITTING', message: 'Claiming refund...' });
+      const signedTx = TransactionBuilder.fromXDR(signedXdr, NETWORK_PASSPHRASE);
+      const sendRes = await server.sendTransaction(signedTx);
 
       if (sendRes.status === 'PENDING') {
-        setTxState({ status: 'PENDING', txHash: sendRes.hash, message: 'Refunding XLM to your wallet...' });
+        setTxState({ status: 'PENDING', txHash: sendRes.hash });
         let txStatus = await server.getTransaction(sendRes.hash);
         while (txStatus.status === rpc.Api.GetTransactionStatus.NOT_FOUND) {
           await new Promise(r => setTimeout(r, 1500));
           txStatus = await server.getTransaction(sendRes.hash);
         }
+
         if (txStatus.status === rpc.Api.GetTransactionStatus.SUCCESS) {
-          setTxState({ status: 'SUCCESS', txHash: sendRes.hash, message: `Refund of ${userDeposit} XLM completed!` });
-          showToast('success', 'Refund Claimed!', `${userDeposit} XLM returned to your wallet.`);
-          await loadAuctionDetails();
-          await refreshUserInfo();
+          setTxState({ status: 'SUCCESS', txHash: sendRes.hash, message: 'Refund claimed!' });
+          showToast('success', 'Refund Claimed!', `${formatXlm(userDeposit)} returned to your wallet.`);
+          await loadData();
         }
       }
     } catch (err: any) {
-      const parsedErr = parseContractError(err);
-      setTxState({ status: 'FAILED', error: parsedErr });
+      const parsed = parseContractError(err);
+      setTxState({ status: 'FAILED', error: parsed });
+      showToast('error', 'Refund Failed', parsed);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="space-y-8 max-w-5xl mx-auto">
-      <Link to="/" className="inline-flex items-center gap-2 text-xs font-semibold text-slate-400 hover:text-white transition-colors">
-        <ArrowLeft className="w-4 h-4" /> Back to All Auctions
+    <div className="py-12 max-w-6xl mx-auto">
+      <Link to="/explore" className="inline-flex items-center gap-2 text-sm font-medium text-brand-600 hover:text-brand-900 transition-colors mb-8">
+        <ArrowLeft className="w-4 h-4" />
+        Back to Marketplace
       </Link>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        {/* Left: Image & Description */}
         <div className="lg:col-span-7 space-y-6">
-          <div className="glass-card rounded-3xl overflow-hidden border border-white/10 bg-dark-card/90">
+          <div className="rounded-2xl overflow-hidden border border-border shadow-sm">
             <img
               src={resolveIpfsUrl(auction.mediaUrl)}
               alt={auction.title}
-              className="w-full max-h-[450px] object-cover"
-              onError={(e) => {
-                (e.target as HTMLImageElement).src = 'https://placehold.co/800x600/121420/8b5cf6?text=Auction+Item';
-              }}
+              className="w-full h-80 lg:h-[450px] object-cover"
             />
           </div>
 
-          <div className="glass-card p-6 rounded-3xl border border-white/10 space-y-4">
-            <div className="flex items-center justify-between">
-              <AuctionStatusBadge status={auction.status} />
-              <span className="text-xs text-slate-400 font-mono">ID: #{auction.id}</span>
-            </div>
-
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-white">{auction.title}</h1>
-            <p className="text-slate-300 text-sm leading-relaxed whitespace-pre-line">{auction.description}</p>
-
-            <div className="pt-4 border-t border-white/5 flex items-center justify-between text-xs text-slate-400">
-              <div className="flex items-center gap-2">
-                <User className="w-4 h-4 text-brand-400" />
-                <span>Created by <span className="font-mono text-slate-200 font-bold">{shortenAddress(auction.creator)}</span></span>
-              </div>
-              <a href={resolveIpfsUrl(auction.mediaUrl)} target="_blank" rel="noreferrer" className="text-brand-400 hover:underline">
-                IPFS Source Link
-              </a>
+          <div className="bg-surface rounded-2xl border border-border p-8">
+            <h1 className="text-3xl font-serif text-brand-900 mb-4">{auction.title}</h1>
+            <p className="text-brand-600 leading-relaxed mb-6">{auction.description}</p>
+            <div className="flex items-center gap-4 text-sm text-brand-500">
+              <span>Created by <span className="font-mono text-brand-900">{shortenAddress(auction.creator, 6)}</span></span>
+              <span>•</span>
+              <span>Auction #{auction.id}</span>
             </div>
           </div>
         </div>
 
+        {/* Right: Bid Panel */}
         <div className="lg:col-span-5 space-y-6">
-          <AuctionTimer endTime={auction.endTime} />
+          {/* Timer */}
+          <div className="bg-surface rounded-2xl border border-border p-6 text-center">
+            <div className="flex items-center justify-center gap-2 text-brand-500 text-sm font-medium mb-2">
+              <Clock className="w-4 h-4" />
+              {isExpired ? 'Auction has ended' : 'Time Remaining'}
+            </div>
+            <p className="text-3xl font-mono font-bold text-brand-900">{timeStr}</p>
+          </div>
 
-          <div className="glass-card p-6 rounded-3xl border border-white/10 space-y-4 bg-gradient-to-br from-dark-card to-brand-900/20">
+          {/* Bid Info */}
+          <div className="bg-surface rounded-2xl border border-border p-6 space-y-4">
             <div className="flex items-center justify-between">
-              <span className="text-xs uppercase tracking-wider font-bold text-slate-400">Current Highest Bid</span>
-              <span className="text-xs text-brand-400 font-semibold">{auction.totalBids} Bids</span>
+              <span className="text-xs uppercase tracking-wider font-semibold text-brand-500">Current Highest Bid</span>
+              <span className="text-xs text-brand-500 font-semibold">{auction.totalBids} Bids</span>
             </div>
 
-            <div className="text-3xl sm:text-4xl font-black text-white flex items-center gap-2">
-              <TrendingUp className="w-8 h-8 text-emerald-400" />
-              {formatXlm(auction.totalBids > 0 ? auction.highestBid : auction.startingBid)}
-            </div>
+            <p className="text-3xl font-mono font-bold text-brand-900">
+              {auction.totalBids > 0 ? formatXlm(auction.highestBid) : formatXlm(auction.startingBid)}
+            </p>
 
-            <div className="grid grid-cols-2 gap-2 pt-2 text-xs">
-              <div className="bg-white/5 p-2.5 rounded-xl">
-                <span className="text-slate-400 block">Starting Bid</span>
-                <span className="font-bold text-white">{formatXlm(auction.startingBid)}</span>
+            <div className="grid grid-cols-2 gap-3 pt-2 text-sm">
+              <div className="bg-brand-50 p-3 rounded-xl">
+                <span className="text-brand-500 text-xs block">Starting Bid</span>
+                <span className="font-mono font-semibold text-brand-900">{formatXlm(auction.startingBid)}</span>
               </div>
-              <div className="bg-white/5 p-2.5 rounded-xl">
-                <span className="text-slate-400 block">Min Increment</span>
-                <span className="font-bold text-brand-400">+{formatXlm(auction.minIncrement)}</span>
+              <div className="bg-brand-50 p-3 rounded-xl">
+                <span className="text-brand-500 text-xs block">Min Increment</span>
+                <span className="font-mono font-semibold text-brand-900">+{formatXlm(auction.minIncrement)}</span>
               </div>
             </div>
 
             {address && userDeposit > 0 && (
-              <div className="p-3.5 rounded-xl bg-brand-500/10 border border-brand-500/30 flex items-center justify-between">
-                <div className="flex items-center gap-2 text-xs text-slate-300">
-                  <Coins className="w-4 h-4 text-brand-400" /> Your Cumulative Escrow:
+              <div className="p-3.5 rounded-xl bg-brand-50 border border-brand-200 flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm text-brand-600">
+                  <Coins className="w-4 h-4 text-brand-500" /> Your Escrow:
                 </div>
-                <span className="text-sm font-extrabold text-white">{formatXlm(userDeposit)}</span>
+                <span className="text-sm font-mono font-bold text-brand-900">{formatXlm(userDeposit)}</span>
               </div>
             )}
 
+            {/* Place Bid Button */}
             {auction.status === 'Approved' && !isExpired && (
               <button
                 onClick={() => {
@@ -338,113 +357,141 @@ export const AuctionPage: React.FC = () => {
                     return;
                   }
                   if (!isRegistered) {
-                    showToast('info', 'Claim Username First', 'Please claim your username in the navbar to bid.');
+                    showToast('info', 'Username Required', 'Please claim your username in the navbar to bid.');
                     return;
                   }
                   setShowBidModal(true);
                 }}
-                disabled={Boolean(isCreator)}
-                className="w-full py-4 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-base rounded-2xl shadow-lg shadow-emerald-500/25 transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                disabled={Boolean(isCreator) || isSubmitting}
+                className="w-full py-4 bg-brand-900 hover:bg-brand-800 text-surface font-semibold text-base rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Gavel className="w-5 h-5" />
                 {isCreator ? 'Cannot Bid On Own Auction' : 'Place / Add To Bid'}
               </button>
             )}
 
+            {/* Finalize Button */}
             {auction.status === 'Approved' && isExpired && (
               <div className="space-y-3 pt-2">
-                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-center">
-                  <Trophy className="w-8 h-8 text-amber-400 mx-auto mb-2" />
-                  <h4 className="text-sm font-bold text-white">Auction Finished</h4>
-                  <p className="text-xs text-slate-300 mt-1">
-                    Winner: <span className="font-mono text-amber-400 font-bold">{shortenAddress(auction.highestBidder)}</span>
+                <div className="p-4 rounded-xl bg-brand-50 border border-brand-200 text-center">
+                  <Trophy className="w-8 h-8 text-brand-600 mx-auto mb-2" />
+                  <h4 className="text-sm font-semibold text-brand-900">Auction Finished</h4>
+                  <p className="text-xs text-brand-600 mt-1">
+                    Winner: <span className="font-mono font-bold">{shortenAddress(auction.highestBidder, 6)}</span>
                   </p>
                 </div>
-
                 <button
-                  onClick={handleFinalizeAuction}
-                  className="w-full py-3 bg-brand-600 hover:bg-brand-500 text-white font-bold rounded-xl text-xs transition-all"
+                  onClick={handleFinalize}
+                  disabled={isSubmitting}
+                  className="w-full py-3 bg-brand-900 hover:bg-brand-800 text-surface font-medium rounded-xl text-sm transition-all disabled:opacity-50"
                 >
                   Finalize Auction & Transfer Winning Funds
                 </button>
               </div>
             )}
 
-            {auction.status === 'Ended' && isLoser && (
-              <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-center space-y-3">
-                <p className="text-xs text-slate-300">You have <span className="font-bold text-white">{formatXlm(userDeposit)}</span> in escrow available for refund.</p>
+            {/* Refund Button */}
+            {isLoser && (
+              <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-center space-y-3">
+                <p className="text-sm text-brand-600">You have <span className="font-bold text-brand-900">{formatXlm(userDeposit)}</span> in escrow available for refund.</p>
                 <button
                   onClick={handleClaimRefund}
-                  className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold rounded-xl text-xs shadow-lg shadow-emerald-500/20 transition-all"
+                  disabled={isSubmitting}
+                  className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl text-sm shadow-sm transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                 >
+                  <RefreshCcw className="w-4 h-4" />
                   Claim Full Escrow Refund
                 </button>
               </div>
             )}
 
+            {/* Winner badge */}
+            {auction.status === 'Ended' && isWinner && (
+              <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-center">
+                <p className="font-semibold text-sm text-emerald-800 mb-1">🎉 You Won This Auction!</p>
+                <p className="text-xs text-emerald-700">The asset is being transferred to your wallet.</p>
+              </div>
+            )}
+
+            {/* Pending notice */}
             {auction.status === 'Pending' && (
-              <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-center text-xs text-amber-300 font-medium">
+              <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-center text-sm text-amber-800 font-medium">
                 This auction is awaiting reviewer approval before bidding opens.
               </div>
             )}
           </div>
-
-          <BidHistory highestBid={auction.highestBid} highestBidder={auction.highestBidder} totalBids={auction.totalBids} />
         </div>
       </div>
 
-      <Modal isOpen={showBidModal} onClose={() => setShowBidModal(false)} title="Place / Increase Cumulative Bid">
-        <form onSubmit={handlePlaceBidSubmit} className="space-y-4">
-          <div className="p-3.5 rounded-xl bg-white/5 border border-white/5 space-y-2 text-xs text-slate-300">
-            <div className="flex justify-between">
-              <span>Your Current Escrow:</span>
-              <span className="font-bold text-white">{formatXlm(userDeposit)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Required Total Target:</span>
-              <span className="font-bold text-emerald-400">At least {formatXlm(minRequiredTotal)}</span>
-            </div>
+      {/* Bid Modal */}
+      {showBidModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-brand-950/40 backdrop-blur-sm">
+          <div className="bg-surface rounded-2xl border border-border w-full max-w-md shadow-xl overflow-hidden p-8">
+            <h3 className="font-serif text-2xl font-medium text-brand-900 mb-6">Place / Increase Bid</h3>
+
+            <form onSubmit={handlePlaceBid}>
+              <div className="p-4 rounded-xl bg-brand-50 border border-brand-100 space-y-2 text-sm text-brand-600 mb-6">
+                <div className="flex justify-between">
+                  <span>Your Current Escrow:</span>
+                  <span className="font-bold text-brand-900">{formatXlm(userDeposit)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Required Total:</span>
+                  <span className="font-bold text-emerald-600">At least {formatXlm(minRequiredTotal)}</span>
+                </div>
+              </div>
+
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-brand-900 mb-2">
+                  Additional XLM to Add to Escrow
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={bidAddition}
+                    onChange={(e) => setBidAddition(e.target.value)}
+                    placeholder={`e.g. ${Math.max(0, minRequiredTotal - userDeposit).toFixed(1)}`}
+                    disabled={isSubmitting}
+                    className="w-full px-4 py-3 bg-brand-50 border border-brand-200 rounded-xl text-brand-900 font-mono focus:outline-none focus:ring-2 focus:ring-brand-400 transition-all"
+                  />
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-semibold text-brand-400">XLM</span>
+                </div>
+                <p className="text-xs text-brand-500 mt-1.5 flex justify-between">
+                  <span>Wallet: {balance.toFixed(2)} XLM</span>
+                  <span>New Total: <strong className="text-brand-900">{currentTotalWithAddition.toFixed(2)} XLM</strong></span>
+                </p>
+              </div>
+
+              {bidError && (
+                <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-medium flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{bidError}</span>
+                </div>
+              )}
+
+              <div className="flex gap-4">
+                <button
+                  type="button"
+                  onClick={() => { setShowBidModal(false); setBidError(''); }}
+                  disabled={isSubmitting}
+                  className="flex-1 py-3 rounded-xl font-medium text-brand-600 hover:bg-brand-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting || !bidAddition}
+                  className="flex-1 py-3 bg-brand-900 text-surface font-medium rounded-xl hover:bg-brand-800 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  <Gavel className="w-4 h-4" />
+                  {isSubmitting ? 'Escrowing...' : `Add +${bidAddition || 0} XLM`}
+                </button>
+              </div>
+            </form>
           </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-              Additional XLM to Add to Escrow
-            </label>
-            <div className="relative">
-              <input
-                type="number"
-                step="0.1"
-                value={bidAddition}
-                onChange={(e) => setBidAddition(e.target.value)}
-                placeholder={`e.g. ${(minRequiredTotal - userDeposit).toFixed(1)}`}
-                disabled={isSubmitting}
-                className="glass-input w-full px-4 py-3 rounded-xl text-lg font-bold"
-              />
-              <span className="absolute right-4 top-3.5 text-xs font-bold text-slate-400">XLM</span>
-            </div>
-            <p className="text-[11px] text-slate-400 mt-1.5 flex justify-between">
-              <span>Wallet Available: {balance.toFixed(2)} XLM</span>
-              <span>New Cumulative: <strong className="text-white">{currentTotalWithAddition.toFixed(2)} XLM</strong></span>
-            </p>
-          </div>
-
-          {bidError && (
-            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs font-medium flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-              <span>{bidError}</span>
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={isSubmitting || !bidAddition}
-            className="w-full py-3.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-sm rounded-xl shadow-lg shadow-emerald-500/25 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-          >
-            <Gavel className="w-4 h-4" />
-            {isSubmitting ? 'Escrowing XLM...' : `Confirm +${bidAddition || 0} XLM Bid Addition`}
-          </button>
-        </form>
-      </Modal>
+        </div>
+      )}
     </div>
   );
-};
+}
