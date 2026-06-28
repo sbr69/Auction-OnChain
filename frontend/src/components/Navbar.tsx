@@ -87,9 +87,9 @@ export function Navbar() {
           <div className="flex items-center gap-8">
             <Link
               to="/"
-              className="flex items-center gap-2 cursor-pointer"
+              className="flex items-center gap-3 cursor-pointer group"
             >
-              <Gavel className="w-6 h-6 text-brand-600" />
+              <img src="/logo.png" alt="StellarBid Logo" className="w-9 h-9 object-contain group-hover:scale-105 transition-transform" />
               <span className="font-serif text-2xl font-semibold tracking-tight text-brand-900">
                 StellarBid
               </span>
