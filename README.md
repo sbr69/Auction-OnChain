@@ -319,25 +319,3 @@ All core settings are in `frontend/src/utils/constants.ts`:
 | **Routing** | React Router DOM v6 |
 
 ---
-
-## Checklist Compliance
-
-| Requirement | Status | Implementation |
-|---|---|---|
-| StellarWalletsKit implementation | ✅ | `wallet.ts` + `WalletContext.tsx` — `allowAllModules()` for multi-wallet support |
-| Error handling (wallet not found) | ✅ | `errors.ts` line 47-48 — detects missing wallet extension |
-| Error handling (rejected) | ✅ | `errors.ts` line 41-42 — catches user rejection/decline |
-| Error handling (insufficient balance) | ✅ | `errors.ts` line 44-45 — catches underfunded accounts |
-| Deploying contract to testnet | ✅ | Contract ID: `CACYFYKNDMOEKWDHCH7PBAXZUCNG7K6YPN2UHWDMLOY6W5ZP6CODS5F4` |
-| Calling contract functions from frontend | ✅ | `contract.ts` — 12+ contract functions called via simulation and transactions |
-| Reading data from contract | ✅ | `simulateTransaction()` for `get_org`, `get_auction`, `get_username`, etc. |
-| Writing data to contract | ✅ | `sendTransaction()` for `register_user`, `create_auction`, `place_bid`, etc. |
-| Event listening & state sync | ✅ | `events.ts` — `EventPoller` polls `getEvents()` every 4s, triggers UI refresh |
-| Transaction status tracking | ✅ | `ToastContext.tsx` — animated progress bar with 6 states |
-| 3+ error types handled | ✅ | 25 contract errors + 3 wallet/network error types = **28 total** |
-| Contract deployed on testnet | ✅ | Verifiable on [Stellar Expert](https://stellar.expert/explorer/testnet/contract/CACYFYKNDMOEKWDHCH7PBAXZUCNG7K6YPN2UHWDMLOY6W5ZP6CODS5F4) |
-| Contract called from frontend | ✅ | All CRUD operations work end-to-end |
-| Transaction status visible | ✅ | `SIMULATING → SIGNING → SUBMITTING → PENDING → SUCCESS/FAILED` with toast notifications |
-
----
-
