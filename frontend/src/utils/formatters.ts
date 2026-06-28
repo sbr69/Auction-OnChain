@@ -47,7 +47,8 @@ export function resolveIpfsUrl(url: string): string {
   if (!url) return 'https://placehold.co/600x400/2a3b40/9ebbc0?text=No+Media';
   if (url.startsWith('ipfs://')) {
     const hash = url.replace('ipfs://', '');
-    return `https://ipfs.io/ipfs/${hash}`;
+    const gateway = import.meta.env.VITE_PINATA_GATEWAY || 'https://ipfs.io';
+    return `${gateway}/ipfs/${hash}`;
   }
   return url;
 }

@@ -39,6 +39,7 @@ pub enum AuctionError {
     NotOrgOwner = 22,
     AlreadyOrgMember = 23,
     NotOrgMember = 24,
+    OrgAlreadyExists = 25,
 }
 
 #[contract]
@@ -126,6 +127,10 @@ impl StellarBidAuction {
             return Err(AuctionError::UserNotRegistered);
         }
 
+        if env.storage().persistent().has(&DataKey::OrgExists(name.clone())) {
+            return Err(AuctionError::OrgAlreadyExists);
+        }
+
         let mut org_count: u64 = env.storage().instance().get(&DataKey::OrgCount).unwrap_or(0);
         org_count += 1;
 
@@ -138,6 +143,7 @@ impl StellarBidAuction {
         };
 
         env.storage().persistent().set(&DataKey::Org(org_count), &org);
+        env.storage().persistent().set(&DataKey::OrgExists(name.clone()), &org_count);
         env.storage().instance().set(&DataKey::OrgCount, &org_count);
 
         // Owner is automatically a member of their own org

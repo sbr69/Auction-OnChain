@@ -13,4 +13,5 @@ pub enum DataKey {
     OrgCount,
     Org(u64),
     OrgMember(u64, Address),
+    OrgExists(String),
 }

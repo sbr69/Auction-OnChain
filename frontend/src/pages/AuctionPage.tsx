@@ -11,7 +11,57 @@ import { WalletService } from '../services/wallet';
 import { signTransactionWithKit } from '../services/transactionHelper';
 import { rpc, Contract, TransactionBuilder, Address, xdr } from '@stellar/stellar-sdk';
 import { CONTRACT_ID, NETWORK_PASSPHRASE, RPC_URL } from '../utils/constants';
-import { Gavel, Clock, ArrowLeft, Trophy, Coins, AlertCircle, RefreshCcw, ExternalLink } from 'lucide-react';
+import { Gavel, Clock, ArrowLeft, Trophy, Coins, AlertCircle, RefreshCcw, ExternalLink, ImageOff } from 'lucide-react';
+
+function AuctionImage({ src, alt, mediaUrl }: { src: string; alt: string; mediaUrl: string }) {
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState(false);
+  const isIpfs = mediaUrl?.startsWith('ipfs://');
+  const cid = isIpfs ? mediaUrl.replace('ipfs://', '') : null;
+
+  return (
+    <div className="relative w-full h-80 lg:h-[450px] bg-brand-50">
+      {/* Loading skeleton */}
+      {!loaded && !error && (
+        <div className="absolute inset-0 flex items-center justify-center bg-brand-100 animate-pulse">
+          <div className="text-brand-400 text-sm font-medium">Loading image…</div>
+        </div>
+      )}
+
+      {/* Error state */}
+      {error && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-brand-50 text-brand-400">
+          <ImageOff className="w-12 h-12" />
+          <p className="text-sm">Image unavailable</p>
+        </div>
+      )}
+
+      {/* Actual image */}
+      {!error && (
+        <img
+          src={src}
+          alt={alt}
+          className={`w-full h-full object-cover transition-opacity duration-500 ${loaded ? 'opacity-100' : 'opacity-0'}`}
+          onLoad={() => setLoaded(true)}
+          onError={() => { setError(true); setLoaded(true); }}
+        />
+      )}
+
+      {/* IPFS badge */}
+      {isIpfs && cid && loaded && !error && (
+        <a
+          href={src}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="absolute bottom-3 right-3 flex items-center gap-1.5 px-2.5 py-1 bg-brand-900/80 backdrop-blur-sm text-white text-xs rounded-lg font-mono opacity-0 group-hover:opacity-100 transition-opacity hover:bg-brand-900"
+        >
+          <ExternalLink className="w-3 h-3" />
+          ipfs://{cid.slice(0, 8)}…
+        </a>
+      )}
+    </div>
+  );
+}
 
 export function AuctionPage() {
   const { id } = useParams<{ id: string }>();
@@ -287,12 +337,13 @@ export function AuctionPage() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         {/* Left: Image & Description */}
         <div className="lg:col-span-7 space-y-6">
-          <div className="rounded-2xl overflow-hidden border border-border shadow-sm">
-            <img
-              src={resolveIpfsUrl(auction.mediaUrl)}
-              alt={auction.title}
-              className="w-full h-80 lg:h-[450px] object-cover"
-            />
+          <div className="rounded-2xl overflow-hidden border border-border shadow-sm relative group">
+            {(() => {
+              const src = resolveIpfsUrl(auction.mediaUrl);
+              return (
+                <AuctionImage src={src} alt={auction.title} mediaUrl={auction.mediaUrl} />
+              );
+            })()}
           </div>
 
           <div className="bg-surface rounded-2xl border border-border p-8">

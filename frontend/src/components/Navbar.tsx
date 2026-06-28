@@ -86,7 +86,7 @@ export function Navbar() {
         <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
           <div className="flex items-center gap-8">
             <Link
-              to={address ? '/explore' : '/'}
+              to="/"
               className="flex items-center gap-2 cursor-pointer"
             >
               <Gavel className="w-6 h-6 text-brand-600" />

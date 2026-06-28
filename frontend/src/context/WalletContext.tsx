@@ -51,10 +51,13 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const owned = allOrgs.filter(o => o.owner.toUpperCase() === address.toUpperCase());
       setOwnedOrgs(owned);
 
+      const ownedIds = owned.map(o => o.id);
+      const memberIds: number[] = [...ownedIds];
+
       // Check membership for each org
       const { isOrgMember } = await import('../services/contract');
-      const memberIds: number[] = [];
       for (const org of allOrgs) {
+        if (ownedIds.includes(org.id)) continue;
         const isMember = await isOrgMember(org.id, address);
         if (isMember) memberIds.push(org.id);
       }

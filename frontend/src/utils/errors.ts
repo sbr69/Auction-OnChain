@@ -23,6 +23,7 @@ export const CONTRACT_ERRORS: Record<number, string> = {
   22: "Not Organisation Owner: Only the org owner can perform this action.",
   23: "Already a member of this organisation.",
   24: "Not a member of this organisation. Please join first.",
+  25: "An organisation with this name already exists. Please choose a different name.",
 };
 
 export function parseContractError(error: any): string {

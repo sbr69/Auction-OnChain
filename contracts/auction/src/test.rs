@@ -202,6 +202,43 @@ fn test_create_org_success() {
 }
 
 #[test]
+fn test_create_org_duplicate_name_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(StellarBidAuction, ());
+    let client = StellarBidAuctionClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_contract = env.register_stellar_asset_contract_v2(token_admin);
+    let token_id = token_contract.address();
+
+    client.initialize(&admin, &token_id);
+
+    let owner1 = Address::generate(&env);
+    client.register_user(&owner1, &String::from_str(&env, "ownerone"));
+    let owner2 = Address::generate(&env);
+    client.register_user(&owner2, &String::from_str(&env, "ownertwo"));
+
+    // First creation succeeds
+    client.create_org(
+        &owner1,
+        &String::from_str(&env, "Unique Org"),
+        &String::from_str(&env, "A test organisation"),
+    );
+
+    // Second creation fails with duplicate name
+    let result = client.try_create_org(
+        &owner2,
+        &String::from_str(&env, "Unique Org"),
+        &String::from_str(&env, "Another organisation"),
+    );
+
+    assert_eq!(result, Err(Ok(AuctionError::OrgAlreadyExists)));
+}
+
+#[test]
 fn test_create_org_unregistered_fails() {
     let env = Env::default();
     env.mock_all_auths();
